@@ -1,0 +1,28 @@
+
+CREATE TABLE LEAP.ES_EVENT_LOG (
+    Doc_Id VARCHAR(7) NOT NULL, 
+    Doc_Log INT, 
+    DOC_STATUS_DESC VARCHAR(80), 
+    Proc_type VARCHAR(90), 
+    Description VARCHAR(80), 
+    Text_ TEXT,
+    StartDateTime DATETIME NOT NULL, 
+    End_DateTime DATETIME, 
+    USER_NAME VARCHAR(50), 
+    DOCTYPE VARCHAR(50), 
+    BUKRS VARCHAR(60), 
+    BLART VARCHAR(60), 
+    NOFIRSTPASS VARCHAR(60),
+    channel_id VARCHAR(60),
+    CONFIRMED_NO_DUP VARCHAR(60), 
+    VEND_NAME VARCHAR(60), 
+    GJAHR VARCHAR(60), 
+    SCAN_LOC VARCHAR(60),
+    PRIMARY KEY(Doc_Id,Doc_Log,StartDateTime)
+);
+
+
+/*
+SELECT STR_TO_DATE("14.12.2016 20:25:48",'%d.%m.%Y %H:%i:%s');
+*/
+
