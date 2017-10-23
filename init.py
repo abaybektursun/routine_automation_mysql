@@ -5,6 +5,7 @@ import re
 import csv
 import time
 import json
+import glob
 import string
 import logging
 import pymysql
@@ -50,13 +51,14 @@ def decide_dtype(field):
             'NULL'     in field_ratios: return 'DATETIME'
     if  len(field_ratios) > 1  and \
             'DATETIME' in field_ratios and \
-            'DECIMAL'  in field_ratios: return 'TEXT'
+            'DOUBLE'  in field_ratios: return 'TEXT'
     if  len(field_ratios) > 1  and \
             'DATETIME' in field_ratios and \
             'INT'      in field_ratios: return 'TEXT'
-    if 'TEXT'        in field_ratios: return 'TEXT'
-    if 'VARCHAR(50)' in field_ratios: return 'VARCHAR(50)'
-    if 'DECIMAL'     in field_ratios: return 'DECIMAL'
+    if 'TEXT'          in field_ratios: return 'TEXT'
+    if 'VARCHAR(50)'   in field_ratios: return 'VARCHAR(50)'
+    if 'DOUBLE'       in field_ratios: return 'DOUBLE'
+    if 'BIGINT'        in field_ratios: return 'BIGINT'
     return 'INT'
     #print(json.dumps(field_ratios,indent=4)) 
 
@@ -64,9 +66,12 @@ def parse_type(in_str):
     string = in_str.strip()
     if len(string) > 50: return 'TEXT'
     if not string or string.lower() == 'null': return 'NULL'
-    try: int(string); return 'INT'; 
+    try: 
+        if int(string) < (2**32)//2:
+            return 'INT'
+        else: return 'BIGINT'
     except: pass
-    try: float(string); return 'DECIMAL'; 
+    try: float(string); return 'DOUBLE'; 
     except: pass
     try: dateutil.parser.parse(string); return 'DATETIME'
     except: pass
@@ -79,6 +84,7 @@ def analyze_columns(DATA_FILE_NAME):
         reader = csv.reader(logFile)
         COLUMN_NAMES   = next(reader)
         COLUMN_NAMES   = [re.sub('[^0-9a-zA-Z]+', '_', a_name.strip()) for a_name in COLUMN_NAMES]
+        print(COLUMN_NAMES)
         for cname in COLUMN_NAMES:
             duplic_indices = [i for i, x in enumerate(COLUMN_NAMES) if x == cname]
             if len(duplic_indices) > 1:
@@ -91,7 +97,7 @@ def analyze_columns(DATA_FILE_NAME):
         for fname in COLUMN_NAMES: types[fname] = {}
 
         for row_num, row in enumerate(reader):
-            if row_num%700 == 0: print('Row Number: '+str(row_num))
+            if row_num%3000 == 0: print('Row Number: '+str(row_num))
             for idx, a_str in enumerate(row):
                 fname = COLUMN_NAMES[idx]; dtype = parse_type(a_str)
                 if dtype in types[fname]: types[fname][dtype] += 1
@@ -101,7 +107,7 @@ def analyze_columns(DATA_FILE_NAME):
         print(json.dumps(types, indent=4))
         for f in types: COLUMN_TYPE[f] = decide_dtype(types[f])
     
-    prows = len(COLUMN_NAMES)//2
+    '''prows = len(COLUMN_NAMES)//2
     if len(COLUMN_NAMES) < 10: f, ax = plt.subplots(prows,prows)
 
     for index, dist in enumerate(lens):
@@ -111,7 +117,7 @@ def analyze_columns(DATA_FILE_NAME):
             xp = (index)%prows; yp = (index)//prows; 
             ax[xp,yp].hist(dist)
             ax[xp, yp].set_title(COLUMN_NAMES[index])
-    if len(COLUMN_NAMES) < 10: plt.show()
+    if len(COLUMN_NAMES) < 10: plt.show()'''
 
 #----------------------------------------------------------------------------------------------------------------------------------------------
 def push_to_db(DATA_FILE_NAME):
@@ -125,12 +131,13 @@ def push_to_db(DATA_FILE_NAME):
         dml_base = "INSERT INTO "+tbl_name +" ({cnames}) VALUES({vals});"
         
         for row_num, row in enumerate(reader):
+            if row_num%3000 == 0: print('Pushing Row Number: '+str(row_num))
             names = ""; vals = ""
             for idx, a_str in enumerate(row):
                 ctype = COLUMN_TYPE[COLUMN_NAMES[idx]]
                 if ctype:
                     names += COLUMN_NAMES[idx]+','
-                    if not a_str.strip(): vals += 'NULL,'
+                    if not a_str.strip() or a_str.strip().upper() == 'NULL': vals += 'NULL,'
                     elif ctype in ['TEXT','VARCHAR(50)']:
                         vals  += "'{}',".format(a_str.replace('\n',' ').replace("'","\\'").replace('"',"\\'").encode('ascii','ignore').decode())
                     elif ctype in ['DATETIME']:
@@ -159,77 +166,25 @@ def generate_ddl(filenm):
 
     return ddl_base
 
-
-
-# ES Log specific ##################################################################################################################################################
-ES_DATA_FILE_NAME = "ES_EVENT_LOG_v11.csv"
-def es_push_to_db():
-    with open(ES_DATA_FILE_NAME) as logFile:
-        reader = csv.reader(logFile)
-        COLUMN_NAMES = next(reader)
-        for row in reader:
-            dml = """
-            INSERT INTO LEAP.ES_EVENT_LOG
-            VALUES(
-                "{}",  {} , "{}",
-                "{}", "{}", "{}",
-                STR_TO_DATE('{} {}','%d.%m.%Y %H:%i:%s'),
-                STR_TO_DATE('{} {}','%d.%m.%Y %H:%i:%s'),
-                            "{}",
-                "{}", "{}", "{}",
-                "{}", "{}", "{}",
-                "{}", "{}", "{}"
-            )
-            """.format(
-                    row[0], row[1], row[2],
-                    row[3], row[4], row[5],
-                    row[6],  row[7],
-                    row[ 9], row[10], 
-                    row[11], 
-                    row[12], row[13], row[14], 
-                    row[15], row[16], row[17], 
-                    row[18], row[19], row[20]
-                    )
-            DB_cursor.execute(dml)
-        DB_cursor.execute('commit')
-#####################################################################################################################################################################
-
-# 50M test Log specific #############################################################################################################################################
-M50_DATA_FILE_NAME = "data/50M_TEST.csv"
-def m50_push_to_db():
-    with open(M50_DATA_FILE_NAME) as logFile:
-        reader = csv.reader(logFile)
-        COLUMN_NAMES = next(reader)
-        for row in reader:
-            rowNew = list(row)
-            rowNew[6] = rowNew[6] if rowNew[6].strip() else 'NULL'
-            dml = """
-            INSERT INTO LEAP.TEST_50M
-            VALUES {}
-            """.format(tuple(rowNew)).replace('\'NULL\'', 'NULL')
-            DB_cursor.execute(dml)
-        DB_cursor.execute('commit')
-
-M50H_DATA_FILE_NAME = "data/50M_TEST_header.csv"
-def m50h_push_to_db():
-    with open(M50H_DATA_FILE_NAME) as logFile:
-        reader = csv.reader(logFile)
-        COLUMN_NAMES = next(reader)
-        for row in reader:
-            rowNew = list(row)
-            dml = """
-            INSERT INTO LEAP.TEST_50M_HEADER
-            VALUES {}
-            """.format(tuple(rowNew)).replace('\'NULL\'', 'NULL')
-            DB_cursor.execute(dml)
-        DB_cursor.execute('commit')
-#####################################################################################################################################################################
-
 # Run ---------------------------------------------------------------------------------------------------------------------------
-analyze_columns("data/CCOW_requestssinceApril1.csv")
-#DB_cursor.execute(generate_ddl('CCOW_requestssinceApril1.csv'))
-push_to_db("data/CCOW_requestssinceApril1.csv")
-DB_cursor.execute('commit;')
 
-# Hosekeeping -------------------------------------------------------------------------------------------------------------------
-DB_cursor.close(); connection.close()
+glob_file_search_string = '/home/abaybektursun/Desktop/LEAP_LOG_DATA/**/*.csv'
+failed = []
+for dFile in glob.iglob(glob_file_search_string, recursive=True):
+    print('-'*150)
+    print('Starting: ' + dFile)
+    try:
+        analyze_columns(dFile)
+        DB_cursor.execute(generate_ddl(dFile))
+        push_to_db(dFile)
+        DB_cursor.execute('commit;')
+    except Exception as e:
+        failed.append([dFile,str(e)])
+    print('-'*150)
+
+for fail in failed:
+    print(('#'*50)+'FAILS'+('#'*50))
+    print("{}\n\t{}".format(fail[0], fail[1]))
+
+
+# Hosekeeping -------------------------------------------------------------------------------------------------------------------DB_cursor.close(); connection.close()
