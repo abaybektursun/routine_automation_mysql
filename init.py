@@ -131,7 +131,6 @@ def push_to_db(DATA_FILE_NAME):
         dml_base = "INSERT INTO "+tbl_name +" ({cnames}) VALUES({vals});"
         
         for row_num, row in enumerate(reader):
-            if row_num%3000 == 0: print('Pushing Row Number: '+str(row_num))
             names = ""; vals = ""
             for idx, a_str in enumerate(row):
                 ctype = COLUMN_TYPE[COLUMN_NAMES[idx]]
@@ -143,6 +142,9 @@ def push_to_db(DATA_FILE_NAME):
                     elif ctype in ['DATETIME']:
                         vals  += "'{}',".format(dateutil.parser.parse(a_str).strftime('%Y-%m-%d %H:%M:%S') ) 
                     else: vals += a_str + ','
+            if row_num%3000 == 0: 
+                print('Pushing Row Number: '+str(row_num))
+                print(dml_base.format(cnames=names,vals=vals))
             names = names[:-1]
             vals  = vals[:-1]
             try:
@@ -167,24 +169,28 @@ def generate_ddl(filenm):
     return ddl_base
 
 # Run ---------------------------------------------------------------------------------------------------------------------------
+def context_run(dFile):
+    global COLUMN_TYPE; global COLUMN_TYPE;
+    COLUMN_TYPE  = {}
+    COLUMN_NAMES = []
+    analyze_columns(dFile)
+    DB_cursor.execute(generate_ddl(dFile))
+    print(generate_ddl(dFile))
+    push_to_db(dFile)
 
 glob_file_search_string = '/home/abaybektursun/Desktop/LEAP_LOG_DATA/**/*.csv'
-failed = []
 for dFile in glob.iglob(glob_file_search_string, recursive=True):
     print('-'*150)
     print('Starting: ' + dFile)
     try:
-        analyze_columns(dFile)
-        DB_cursor.execute(generate_ddl(dFile))
-        push_to_db(dFile)
+        context_run(dFile)
         DB_cursor.execute('commit;')
     except Exception as e:
-        failed.append([dFile,str(e)])
+        logging.error("{}:{}".format(dFile,str(e)))
     print('-'*150)
 
-for fail in failed:
-    print(('#'*50)+'FAILS'+('#'*50))
-    print("{}\n\t{}".format(fail[0], fail[1]))
+
+# Hosekeeping -------------------------------------------------------------------------------------------------------------------
+DB_cursor.close(); connection.close()
 
 
-# Hosekeeping -------------------------------------------------------------------------------------------------------------------DB_cursor.close(); connection.close()
